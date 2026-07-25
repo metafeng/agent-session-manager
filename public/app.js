@@ -629,9 +629,6 @@ function renderAnalytics(data) {
   const totals = data.totals || {};
   const calendar = buildActivityCalendar(data.token_by_day, 365);
   const peak = Math.max(...calendar.cells.map((item) => item.tokens), 0);
-  const highReasoningPercent = totals.sessions
-    ? Math.round(((data.reasoning_counts?.high || 0) / totals.sessions) * 100)
-    : 0;
   const cells = calendar.cells
     .map((item) => {
       const level = tokenLevel(item.tokens, peak);
@@ -657,15 +654,25 @@ function renderAnalytics(data) {
         )
         .join("")
     : `<div class="stats-empty">暂未解析到 Skill 使用记录。</div>`;
+  const insights = (data.insights || [])
+    .map(
+      (item) => `
+        <div>
+          <span>${escapeHtml(item.label || "指标")}</span>
+          <strong>${escapeHtml(item.value ?? "未知")}</strong>
+        </div>
+      `
+    )
+    .join("");
 
   els.statsSubtitle.textContent = `统计生成于 ${fmtFullDate(data.generated_at)}`;
   els.statsModalBody.innerHTML = `
     <div class="stats-strip">
       <div><strong>${escapeHtml(fmtCompactNumber(totals.tokens))}</strong><span>累计 Token</span></div>
-      <div><strong>${escapeHtml(fmtCompactNumber(totals.peak_tokens))}</strong><span>单会话峰值</span></div>
+      <div><strong>${escapeHtml(fmtCompactNumber(totals.peak_tokens))}</strong><span>${escapeHtml(totals.peak_label || "单会话峰值")}</span></div>
       <div><strong>${escapeHtml(fmtDuration(totals.longest_task_seconds))}</strong><span>最长任务</span></div>
-      <div><strong>${escapeHtml(totals.sessions)}</strong><span>会话总数</span></div>
-      <div><strong>${escapeHtml(totals.unique_skills)}</strong><span>已探索 Skill</span></div>
+      <div><strong>${escapeHtml(totals.sessions)}</strong><span>${escapeHtml(totals.sessions_label || "会话总数")}</span></div>
+      <div><strong>${escapeHtml(totals.unique_skills)}</strong><span>实际使用 Skill</span></div>
     </div>
 
     <section class="stats-section">
@@ -682,12 +689,7 @@ function renderAnalytics(data) {
     <div class="stats-columns">
       <section class="stats-section">
         <h3>活动洞察</h3>
-        <div class="insight-list">
-          <div><span>最常用推理强度</span><strong>${escapeHtml(totals.top_reasoning || "未知")}</strong></div>
-          <div><span>高推理占比</span><strong>${escapeHtml(highReasoningPercent)}%</strong></div>
-          <div><span>Skill 调用记录</span><strong>${escapeHtml(totals.skill_events || 0)}</strong></div>
-          <div><span>未归档会话</span><strong>${escapeHtml(totals.active || 0)}</strong></div>
-        </div>
+        <div class="insight-list">${insights}</div>
       </section>
       <section class="stats-section">
         <h3>最常用的 Skill</h3>

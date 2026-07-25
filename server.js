@@ -7,6 +7,8 @@ import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import os from "node:os";
+import { extractInvokedSkills, scanSkillUsage } from "./skill-usage.js";
+import { scanClaudeUsageMetrics, scanCodexUsageMetrics } from "./usage-metrics.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -17,7 +19,6 @@ const logsDb = join(codexHome, "logs_2.sqlite");
 const archivedDir = join(codexHome, "archived_sessions");
 const claudeHome = process.env.CLAUDE_HOME || join(os.homedir(), ".claude");
 const claudeProjectsDir = join(claudeHome, "projects");
-const claudeStatsCache = join(claudeHome, "stats-cache.json");
 const port = Number(process.env.PORT || 8787);
 
 const mimeTypes = {
@@ -278,22 +279,13 @@ function processText(value, max = 500) {
   return compactText(String(value || "").replace(/\n{3,}/g, "\n\n"), max);
 }
 
-function extractSkills(text) {
-  const value = String(text || "");
-  const names = new Set();
-  for (const match of value.matchAll(/\[\$([^\]]+)\]/g)) names.add(match[1]);
-  for (const match of value.matchAll(/\/skills\/([^/\s]+)\/SKILL\.md/g)) names.add(match[1]);
-  for (const match of value.matchAll(/\b([A-Za-z0-9][A-Za-z0-9_-]{2,})\s+Skill\b/g)) names.add(match[1]);
-  return [...names];
-}
-
 function pushProcess(processEvents, event) {
   if (!event?.title) return;
   const previous = processEvents[processEvents.length - 1];
   if (previous?.title === event.title && previous?.kind === event.kind) return;
   processEvents.push({
     ...event,
-    skills: [...new Set([...(event.skills || []), ...extractSkills(`${event.title}\n${event.detail || ""}`)])]
+    skills: [...new Set(event.skills || [])]
   });
 }
 
@@ -332,13 +324,6 @@ function durationLabel(firstTimestamp, lastTimestamp) {
   return `${minutes}m ${rest}s`;
 }
 
-function durationSecondsFromLabel(label) {
-  const value = String(label || "");
-  const minutes = value.match(/(\d+)m/)?.[1] || 0;
-  const seconds = value.match(/(\d+)s/)?.[1] || 0;
-  return Number(minutes) * 60 + Number(seconds);
-}
-
 function summarizeProcess(events) {
   const skills = [...new Set((events || []).flatMap((event) => event.skills || []))].slice(0, 16);
   return {
@@ -350,73 +335,67 @@ function summarizeProcess(events) {
   };
 }
 
-function dayKey(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString().slice(0, 10);
-}
-
 async function getAnalytics() {
   const sessions = await getSessions();
-  const tokenByDay = {};
   const skillCounts = {};
   const reasoningCounts = {};
   let totalTokens = 0;
   let peakTokens = 0;
-  let longestSeconds = 0;
-  let skillEvents = 0;
 
   for (const session of sessions) {
     const tokens = Number(session.tokens_used || 0);
     totalTokens += tokens;
     peakTokens = Math.max(peakTokens, tokens);
-    const key = dayKey(session.updated_at || session.created_at);
-    if (key) tokenByDay[key] = (tokenByDay[key] || 0) + tokens;
     const reasoning = session.reasoning_effort || "unknown";
     reasoningCounts[reasoning] = (reasoningCounts[reasoning] || 0) + 1;
-
-    if (!session.rollout_path) continue;
-    try {
-      const rollout = await parseRollout(session.rollout_path, 900);
-      longestSeconds = Math.max(longestSeconds, durationSecondsFromLabel(rollout.process_summary?.duration));
-      for (const event of rollout.process_events || []) {
-        for (const skill of event.skills || []) {
-          skillCounts[skill] = (skillCounts[skill] || 0) + 1;
-          skillEvents += 1;
-        }
-      }
-    } catch {
-      // Ignore unreadable rollout files in aggregate analytics.
-    }
   }
 
+  const rolloutPaths = sessions.map((session) => session.rollout_path);
+  const [skillUsage, usageMetrics] = await Promise.all([
+    scanSkillUsage(rolloutPaths, "codex"),
+    scanCodexUsageMetrics(rolloutPaths)
+  ]);
+  Object.assign(skillCounts, skillUsage.counts);
   const topSkills = Object.entries(skillCounts)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 12)
     .map(([name, count]) => ({ name, count }));
 
   const topReasoning = Object.entries(reasoningCounts).sort((a, b) => b[1] - a[1])[0] || ["unknown", 0];
+  const highReasoningPercent = sessions.length
+    ? Math.round(((reasoningCounts.high || 0) / sessions.length) * 100)
+    : 0;
 
   return {
     generated_at: new Date().toISOString(),
+    source: "codex",
     totals: {
       tokens: totalTokens,
       peak_tokens: peakTokens,
+      peak_label: "单会话峰值",
       sessions: sessions.length,
+      sessions_label: "会话总数",
       active: sessions.filter((item) => !item.archived).length,
       archived: sessions.filter((item) => item.archived).length,
       unique_skills: Object.keys(skillCounts).length,
-      skill_events: skillEvents,
+      skill_events: skillUsage.total,
       top_reasoning: topReasoning[0],
       top_reasoning_count: topReasoning[1],
-      longest_task_seconds: longestSeconds
+      longest_task_seconds: usageMetrics.longest_task_seconds,
+      completed_tasks: usageMetrics.completed_tasks,
+      observed_tokens: usageMetrics.observed_tokens
     },
-    token_by_day: Object.entries(tokenByDay)
+    token_by_day: Object.entries(usageMetrics.token_by_day)
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, tokens]) => ({ date, tokens })),
     top_skills: topSkills,
-    reasoning_counts: reasoningCounts
+    reasoning_counts: reasoningCounts,
+    insights: [
+      { label: "最常用推理强度", value: topReasoning[0] || "未知" },
+      { label: "高推理会话", value: `${highReasoningPercent}%` },
+      { label: "实际调用次数", value: skillUsage.total },
+      { label: "未归档会话", value: sessions.filter((item) => !item.archived).length }
+    ]
   };
 }
 
@@ -721,6 +700,7 @@ async function parseRollout(path, lineLimit = 1200) {
 
       const name = payload.name || payload.recipient_name;
       if (payload.type === "function_call") {
+        const invokedSkills = extractInvokedSkills(name || payload.type, payload.arguments);
         const item = {
           name: name || payload.type || "tool",
           status: "called",
@@ -731,6 +711,7 @@ async function parseRollout(path, lineLimit = 1200) {
           kind: "tool",
           title: `调用 ${item.name}`,
           detail: summarizeFunctionCall(payload.arguments),
+          skills: invokedSkills,
           timestamp: event.timestamp || null
         });
       } else if (payload.type === "function_call_output") {
@@ -891,7 +872,7 @@ function ccShouldHideUserContent(content) {
   return false;
 }
 
-async function parseCCSession(filePath, lineLimit = 400) {
+async function parseCCSession(filePath, lineLimit = Infinity) {
   const rl = createInterface({
     input: createReadStream(filePath, { encoding: "utf8" }),
     crlfDelay: Infinity
@@ -937,19 +918,18 @@ async function parseCCSession(filePath, lineLimit = 400) {
       if (!version) version = event.version || null;
 
       const userContent = event.message?.content ?? event.content;
-      if (!firstUserText && typeof userContent === "string" && !ccShouldHideUserContent(userContent)) {
-        firstUserText = userContent.trim();
+      if (typeof userContent === "string" && !ccShouldHideUserContent(userContent)) {
+        if (!firstUserText) firstUserText = userContent.trim();
         turnCount += 1;
       }
     }
 
     if (event.type === "assistant" && !event.isSidechain) {
       const msg = event.message || {};
-      if (!model && msg.model) model = msg.model;
+      if (!model && msg.model && !String(msg.model).startsWith("<")) model = msg.model;
       const usage = msg.usage || {};
       totalInputTokens += (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
       totalOutputTokens += usage.output_tokens || 0;
-      if (turnCount > 0) turnCount += 1;
     }
   }
 
@@ -1051,6 +1031,7 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
           if (text) messages.push({ role: "assistant", text, timestamp: ts });
         } else if (part.type === "tool_use") {
           const name = part.name || "tool";
+          const invokedSkills = extractInvokedSkills(name, part.input);
           toolCalls.push({ name, status: "called", timestamp: ts });
           const inputText = typeof part.input === "string"
             ? part.input
@@ -1059,6 +1040,7 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
             kind: "tool",
             title: `调用 ${name}`,
             detail: summarizeFunctionCall(inputText),
+            skills: invokedSkills,
             timestamp: ts
           });
         }
@@ -1149,76 +1131,54 @@ async function getCCSessions() {
 }
 
 async function getCCAnalytics() {
-  let statsCache = {};
-  try {
-    const data = await readFile(claudeStatsCache, "utf8");
-    statsCache = JSON.parse(data);
-  } catch {
-    // stats-cache.json unavailable
-  }
-
-  const rawDailyTokens = statsCache.dailyModelTokens || [];
-  const tokenByDay = rawDailyTokens.map((item) => ({
-    date: item.date,
-    tokens: Object.values(item.tokensByModel || {}).reduce((a, b) => Number(a) + Number(b), 0)
-  }));
-
-  const modelUsage = statsCache.modelUsage || {};
-  let totalTokens = 0;
-  const modelReasoningCounts = {};
-  for (const [modelName, data] of Object.entries(modelUsage)) {
-    const t = (data.inputTokens || 0) + (data.outputTokens || 0) +
-               (data.cacheReadInputTokens || 0) + (data.cacheCreationInputTokens || 0);
-    totalTokens += t;
-    const sessions = data.sessions || 0;
-    if (sessions) modelReasoningCounts[modelName] = sessions;
-  }
-
-  const peakTokens = tokenByDay.reduce((max, d) => Math.max(max, d.tokens), 0);
-
   const sessions = await getCCSessions();
   const skillCounts = {};
-  let skillEvents = 0;
-  let longestSeconds = 0;
-  for (const session of sessions.slice(0, 60)) {
-    try {
-      const rollout = await parseCCRollout(session.rollout_path, 900);
-      longestSeconds = Math.max(longestSeconds, durationSecondsFromLabel(rollout.process_summary?.duration));
-      for (const event of rollout.process_events || []) {
-        for (const skill of event.skills || []) {
-          skillCounts[skill] = (skillCounts[skill] || 0) + 1;
-          skillEvents += 1;
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
+  const rolloutPaths = sessions.map((session) => session.rollout_path);
+  const [skillUsage, usageMetrics] = await Promise.all([
+    scanSkillUsage(rolloutPaths, "claude"),
+    scanClaudeUsageMetrics(rolloutPaths)
+  ]);
+  Object.assign(skillCounts, skillUsage.counts);
   const topSkills = Object.entries(skillCounts)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 12)
     .map(([name, count]) => ({ name, count }));
 
-  const topReasoning = Object.entries(modelReasoningCounts).sort((a, b) => b[1] - a[1])[0] || ["unknown", 0];
+  const topModel = Object.entries(usageMetrics.model_session_counts)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] || ["未知", 0];
+  const active = sessions.filter((session) => !session.archived).length;
+  const archived = sessions.filter((session) => session.archived).length;
 
   return {
     generated_at: new Date().toISOString(),
+    source: "claude",
     totals: {
-      tokens: totalTokens,
-      peak_tokens: peakTokens,
-      sessions: statsCache.totalSessions || sessions.length,
-      active: sessions.length,
-      archived: 0,
+      tokens: usageMetrics.total_tokens,
+      peak_tokens: usageMetrics.peak_session_tokens,
+      peak_label: "单会话峰值",
+      sessions: sessions.length,
+      sessions_label: "可索引会话",
+      active,
+      archived,
       unique_skills: Object.keys(skillCounts).length,
-      skill_events: skillEvents,
-      top_reasoning: topReasoning[0],
-      top_reasoning_count: topReasoning[1],
-      longest_task_seconds: longestSeconds
+      skill_events: skillUsage.total,
+      top_model: topModel[0],
+      top_model_count: topModel[1],
+      longest_task_seconds: usageMetrics.longest_task_seconds,
+      completed_tasks: usageMetrics.completed_tasks,
+      observed_tokens: usageMetrics.total_tokens
     },
-    token_by_day: tokenByDay,
+    token_by_day: Object.entries(usageMetrics.token_by_day)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, tokens]) => ({ date, tokens })),
     top_skills: topSkills,
-    reasoning_counts: modelReasoningCounts
+    model_counts: usageMetrics.model_session_counts,
+    insights: [
+      { label: "最常用模型", value: topModel[0] || "未知" },
+      { label: "已完成回复", value: usageMetrics.completed_tasks },
+      { label: "实际调用次数", value: skillUsage.total },
+      { label: "未归档会话", value: active }
+    ]
   };
 }
 
@@ -1227,8 +1187,7 @@ async function handleCCApi(req, res, url) {
     return json(res, 200, {
       ok: true,
       claude_home: claudeHome,
-      projects_dir: claudeProjectsDir,
-      stats_cache: claudeStatsCache
+      projects_dir: claudeProjectsDir
     });
   }
 

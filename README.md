@@ -3,7 +3,7 @@
 一个本地只读的 Agent session 可视化管理器，在顶部一键切换 **Codex** 与 **Claude Code** 两套会话管理，功能完全一致。用来浏览 Codex Desktop、Codex CLI、`codex exec`、Claude Code CLI / SDK / 客户端、Obsidian / Claudian、Bridge 场景以及归档会话记录。
 
 - Codex 模式读取本机 `~/.codex` 下的 session、日志和 rollout JSONL 文件。
-- Claude Code 模式读取本机 `~/.claude/projects` 下的会话 JSONL 与 `~/.claude/stats-cache.json` 统计缓存。
+- Claude Code 模式读取本机 `~/.claude/projects` 下当前可索引的会话 JSONL。
 
 帮助你快速找到历史会话、复制恢复命令、查看对话过程、分析 Token 消耗和 Skill 使用频率。
 
@@ -23,7 +23,7 @@
 - Markdown 渲染：支持标题、列表、代码块、表格、引用、行内公式和块级公式。
 - 技术索引：查看 rollout / JSONL 文件、Token、日志数量、行数、推理强度等信息。
 - 会话重要性判断：用本地启发式规则标记“非常重要 / 重要 / 有用 / 不重要”。
-- 用量统计弹窗：汇总累计 Token、单会话峰值、Token 活动热力图、最长任务、Skill 使用频率。
+- 用量统计弹窗：从原始事件汇总累计 Token、单会话峰值、每日 Token 活动、最长任务和 Skill 使用频率。
 
 ## 安装要求
 
@@ -81,7 +81,6 @@ Claude Code 模式默认读取：
 
 ```text
 ~/.claude/projects/**/*.jsonl
-~/.claude/stats-cache.json
 ```
 
 入口来源和场景标签来自本地字段与 rollout 内容的组合判断，包括 `source`、`originator`、`entrypoint`、`cwd`、标题和预览文本。没有稳定来源字段的第三方桥接环境会用路径和关键词启发式识别。
@@ -105,6 +104,12 @@ CLAUDE_HOME=/path/to/.claude npm start
 .
 ├── package.json
 ├── server.js
+├── skill-usage.js
+├── skill-usage.test.js
+├── usage-metrics.js
+├── usage-metrics.test.js
+├── docs
+│   └── agent-session-manager-creation-case.md
 ├── public
 │   ├── index.html
 │   ├── app.js
@@ -127,4 +132,4 @@ node --check public/app.js
 
 这是一个轻量本地工具，没有数据库迁移、构建流程和前端框架。所有界面逻辑在 `public/app.js`，服务端 API 在 `server.js`（Codex 路由 `/api/*`，Claude Code 路由 `/api/cc/*`）。
 
-当前统计功能会在打开“用量统计”弹窗时扫描本地会话文件。会话很多时，第一次统计可能需要等待片刻。
+当前统计功能会在打开“用量统计”弹窗时扫描本地会话文件。Codex 的每日 Token 按 `token_count` 增量归档，Claude Code 的 Token 和任务耗时直接来自当前可索引 JSONL，不依赖可能过期的统计缓存。会话很多时，第一次统计可能需要等待片刻。
