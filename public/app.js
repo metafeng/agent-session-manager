@@ -678,7 +678,7 @@ function updateCustomDateVisibility() {
   const visible = mode === "exact" || mode === "custom";
   els.customDateRange.classList.toggle("is-hidden", !visible);
   els.customDateRange.classList.toggle("single-date", mode === "exact");
-  els.dateStartText.textContent = mode === "exact" ? "日期" : "开始";
+  els.dateStartText.textContent = mode === "exact" ? "创建或更新日期" : "开始日期";
   els.dateEndLabel.classList.toggle("is-hidden", mode === "exact");
 }
 

@@ -36,14 +36,38 @@
             <input id="searchInput" type="search" placeholder="会话名称、ID、项目或对话关键词" autocomplete="off" />
           </label>
 
-          <div class="control-row">
+          <div class="control-row primary-filter-row">
             <label>
-              <span>入口来源</span>
-              <select id="sourceFilter"></select>
+              <span>所属项目</span>
+              <select id="projectFilter"></select>
             </label>
             <label>
-              <span>场景标签</span>
-              <select id="sceneFilter"></select>
+              <span>时间</span>
+              <select id="timeFilter">
+                <option value="all">不限时间</option>
+                <optgroup label="按最近更新">
+                  <option value="today">今天更新过</option>
+                  <option value="7d">最近 7 天更新过</option>
+                  <option value="30d">最近 30 天更新过</option>
+                  <option value="90d">最近 90 天更新过</option>
+                  <option value="year">今年更新过</option>
+                </optgroup>
+                <optgroup label="按创建或更新日期">
+                  <option value="exact">选择某一天…</option>
+                  <option value="custom">选择日期范围…</option>
+                </optgroup>
+              </select>
+            </label>
+          </div>
+
+          <div class="date-range is-hidden" id="customDateRange">
+            <label id="dateStartLabel">
+              <span id="dateStartText">开始日期</span>
+              <input id="dateStart" type="date" />
+            </label>
+            <label id="dateEndLabel">
+              <span>结束日期</span>
+              <input id="dateEnd" type="date" />
             </label>
           </div>
 
@@ -66,32 +90,12 @@
 
           <div class="control-row">
             <label>
-              <span>项目</span>
-              <select id="projectFilter"></select>
+              <span>入口来源</span>
+              <select id="sourceFilter"></select>
             </label>
             <label>
-              <span>时间</span>
-              <select id="timeFilter">
-                <option value="all">全部时间</option>
-                <option value="today">今天</option>
-                <option value="7d">近 7 天</option>
-                <option value="30d">近 30 天</option>
-                <option value="90d">近 90 天</option>
-                <option value="year">今年</option>
-                <option value="exact">指定日期（创建或更新）</option>
-                <option value="custom">日期范围（创建或更新）</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="date-range is-hidden" id="customDateRange">
-            <label id="dateStartLabel">
-              <span id="dateStartText">开始</span>
-              <input id="dateStart" type="date" />
-            </label>
-            <label id="dateEndLabel">
-              <span>结束</span>
-              <input id="dateEnd" type="date" />
+              <span>场景标签</span>
+              <select id="sceneFilter"></select>
             </label>
           </div>
 
