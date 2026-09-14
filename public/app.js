@@ -1071,16 +1071,22 @@ async function loadSessions() {
       "全部服务商"
     );
     if (state.mode === "codex") {
-      setOptions(
-        els.projectFilter,
-        optionCounts(state.sessions, "project_key", "project_name").sort((a, b) => {
-          if (a.value === "none") return 1;
-          if (b.value === "none") return -1;
-          return a.label.localeCompare(b.label, "zh-CN");
-        }),
-        "全部项目"
-      );
-      els.projectFilter.disabled = false;
+      const hasProjects = state.sessions.some((item) => item.project_id);
+      if (hasProjects) {
+        setOptions(
+          els.projectFilter,
+          optionCounts(state.sessions, "project_key", "project_name").sort((a, b) => {
+            if (a.value === "none") return 1;
+            if (b.value === "none") return -1;
+            return a.label.localeCompare(b.label, "zh-CN");
+          }),
+          "全部项目"
+        );
+        els.projectFilter.disabled = false;
+      } else {
+        els.projectFilter.innerHTML = '<option value="all">当前 Codex 暂无项目</option>';
+        els.projectFilter.disabled = true;
+      }
     } else {
       els.projectFilter.innerHTML = '<option value="all">Claude Code 暂无项目</option>';
       els.projectFilter.disabled = true;
