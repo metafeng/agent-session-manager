@@ -10,6 +10,7 @@ import os from "node:os";
 import { extractInvokedSkills, scanSkillUsage } from "./skill-usage.js";
 import { scanClaudeUsageMetrics, scanCodexUsageMetrics } from "./usage-metrics.js";
 import { groupProjectRows, resolveSessionProject } from "./project-mapping.js";
+import { normalizeContentQuery, searchSessionContent } from "./content-search.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -21,6 +22,8 @@ const archivedDir = join(codexHome, "archived_sessions");
 const claudeHome = process.env.CLAUDE_HOME || join(os.homedir(), ".claude");
 const claudeProjectsDir = join(claudeHome, "projects");
 const port = Number(process.env.PORT || 8787);
+const contentSearchCache = { codex: new Map(), claude: new Map() };
+const contentSearchCacheTtlMs = 60_000;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -37,6 +40,21 @@ function json(res, status, body) {
     "cache-control": "no-store"
   });
   res.end(JSON.stringify(body));
+}
+
+function cachedContentSearch(cache, key) {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.ids;
+}
+
+function storeContentSearch(cache, key, ids) {
+  cache.set(key, { ids, expiresAt: Date.now() + contentSearchCacheTtlMs });
+  if (cache.size > 30) cache.delete(cache.keys().next().value);
 }
 
 // ─── archive overlay ─────────────────────────────────────────────────────────
@@ -584,20 +602,23 @@ async function getCodexProjects() {
   }
 }
 
-async function threadProjectColumnSql() {
+async function optionalThreadColumnSql(column) {
   try {
     const rows = await sqliteJson(
       stateDb,
-      `select name from pragma_table_info('threads') where name = 'project_id' limit 1`
+      `select name from pragma_table_info('threads') where name = '${column.replaceAll("'", "''")}' limit 1`
     );
-    return rows.length ? "project_id" : "null as project_id";
+    return rows.length ? column : `null as ${column}`;
   } catch {
-    return "null as project_id";
+    return `null as ${column}`;
   }
 }
 
 async function getSessions() {
-  const projectColumn = await threadProjectColumnSql();
+  const [projectColumn, nameColumn] = await Promise.all([
+    optionalThreadColumnSql("project_id"),
+    optionalThreadColumnSql("name")
+  ]);
   const [rows, projects] = await Promise.all([
     sqliteJson(
       stateDb,
@@ -610,6 +631,7 @@ async function getSessions() {
       thread_source,
       model_provider,
       cwd,
+      ${nameColumn},
       title,
       preview,
       archived,
@@ -651,14 +673,16 @@ async function getSessions() {
       originator
     });
     const importance = judgeImportance({
-      title: row.title,
+      title: row.name || row.title,
       preview: row.preview,
       cwd,
       tokens: row.tokens_used
     });
     return {
       ...row,
-      title: compactText(row.title || row.preview || "Untitled", 180),
+      name: compactText(row.name || "", 180) || null,
+      original_title: compactText(row.title || "", 420) || null,
+      title: compactText(row.name || row.title || row.preview || "Untitled", 180),
       preview: compactText(row.preview || row.title || "", 420),
       created_at: row.created_at_ms ? new Date(row.created_at_ms).toISOString() : null,
       updated_at: row.updated_at_ms ? new Date(row.updated_at_ms).toISOString() : null,
@@ -1252,6 +1276,18 @@ async function handleCCApi(req, res, url) {
     });
   }
 
+  if (url.pathname === "/api/cc/search") {
+    const query = normalizeContentQuery(url.searchParams.get("q"));
+    if (query.length < 2) return json(res, 200, { ids: [], query });
+    const key = query.toLocaleLowerCase();
+    let ids = cachedContentSearch(contentSearchCache.claude, key);
+    if (!ids) {
+      ids = await searchSessionContent(query, [claudeProjectsDir]);
+      storeContentSearch(contentSearchCache.claude, key, ids);
+    }
+    return json(res, 200, { ids, query, count: ids.length });
+  }
+
   if (url.pathname === "/api/cc/analytics") {
     try {
       return json(res, 200, await getCCAnalytics());
@@ -1346,6 +1382,18 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (url.pathname === "/api/search") {
+    const query = normalizeContentQuery(url.searchParams.get("q"));
+    if (query.length < 2) return json(res, 200, { ids: [], query });
+    const key = query.toLocaleLowerCase();
+    let ids = cachedContentSearch(contentSearchCache.codex, key);
+    if (!ids) {
+      ids = await searchSessionContent(query, [join(codexHome, "sessions"), archivedDir]);
+      storeContentSearch(contentSearchCache.codex, key, ids);
+    }
+    return json(res, 200, { ids, query, count: ids.length });
+  }
+
   if (url.pathname === "/api/analytics") {
     try {
       return json(res, 200, await getAnalytics());
@@ -1401,7 +1449,7 @@ async function handleApi(req, res, url) {
       originator
     });
     const importance = judgeImportance({
-      title: session.title,
+      title: session.name || session.title,
       preview: session.preview,
       cwd,
       tokens: session.tokens_used,
@@ -1411,7 +1459,9 @@ async function handleApi(req, res, url) {
     return json(res, 200, {
       session: {
         ...session,
-        title: compactText(session.title || session.preview || "Untitled", 220),
+        name: compactText(session.name || "", 220) || null,
+        original_title: compactText(session.title || "", 720) || null,
+        title: compactText(session.name || session.title || session.preview || "Untitled", 220),
         preview: compactText(session.preview || session.title || "", 720),
         created_at: session.created_at_ms ? new Date(session.created_at_ms).toISOString() : null,
         updated_at: session.updated_at_ms ? new Date(session.updated_at_ms).toISOString() : null,

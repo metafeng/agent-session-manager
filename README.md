@@ -11,12 +11,13 @@
 
 - 双工具切换：顶部切换 Codex / Claude Code，作为大的模式切换，两边功能一模一样。
 - 会话列表：按更新时间浏览本机会话。
+- 精准搜索：会话名称完全一致时优先精确匹配，同时支持检索 ID、项目、路径、模型以及完整对话里的关键词。
 - 多维筛选：支持按入口来源、场景标签、Codex 项目、模型服务商、时间、重要性、归档状态筛选。
 - 入口来源识别：
   - Codex：Codex 客户端、Terminal / Codex CLI、Terminal / codex exec、Obsidian / Claudian、Bridge / Lark、Bridge / Coze、子代理等。
   - Claude Code：SDK / CLI、SDK / TypeScript、Claude CLI、Claude IDE、Claude 客户端、交互式终端等。
 - 场景标签识别：标记飞书 / Lark、Obsidian 笔记、Coze / Bridge、Skill 工作流、SDK 接入、终端项目、Codex 项目等场景。
-- 精确日期：可以用系统日历筛选某一天，也可以按开始和结束日期筛选一个范围。
+- 精确日期：可以用系统日历筛选某一天，也可以按开始和结束日期筛选一个范围；创建时间或更新时间命中都会显示，并在列表中标明匹配时间类型。
 - 项目识别：优先读取新版 Codex 的项目 ID，旧会话按工作目录与项目根目录匹配，嵌套项目以最具体的目录为准。
 - 会话恢复：一键复制恢复命令（Codex：`codex resume <id> --all`；Claude Code：`claude --resume <id>`）。
 - 对话复现：按一轮一轮的用户提问、处理过程、最终回复展示历史会话。
@@ -31,6 +32,7 @@
 - macOS 或其他可访问 Codex / Claude Code 本地数据目录的系统
 - Node.js 18 或更高版本
 - `sqlite3` 命令行工具（Codex 模式需要）
+- `rg`（ripgrep，完整对话关键词检索需要）
 - 本机已有 Codex 或 Claude Code 使用记录，默认读取 `~/.codex` 与 `~/.claude`
 
 检查依赖：
@@ -38,6 +40,7 @@
 ```bash
 node --version
 sqlite3 --version
+rg --version
 ```
 
 ## 安装和运行
@@ -105,6 +108,8 @@ CLAUDE_HOME=/path/to/.claude npm start
 .
 ├── package.json
 ├── server.js
+├── content-search.js
+├── content-search.test.js
 ├── project-mapping.js
 ├── project-mapping.test.js
 ├── skill-usage.js

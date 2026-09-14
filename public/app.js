@@ -6,6 +6,12 @@ const state = {
   stats: null,
   technicalCollapsed: false,
   sessionInfoCollapsed: true,
+  contentMatchIds: new Set(),
+  contentSearchQuery: "",
+  contentSearchPending: false,
+  contentSearchError: "",
+  contentSearchTimer: null,
+  contentSearchRequest: 0,
   mode: "codex"  // "codex" | "claude"
 };
 
@@ -472,15 +478,16 @@ function dateValueAtEnd(value) {
 
 function matchesTimeRange(item, range, startDate, endDate) {
   if (range === "all") return true;
-  const value = item.updated_at || item.created_at;
-  if (!value) return false;
-  const time = new Date(value).getTime();
-  if (!Number.isFinite(time)) return false;
+  const times = [item.created_at, item.updated_at]
+    .filter(Boolean)
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite);
+  if (!times.length) return false;
   if (range === "exact") {
     const start = dateValueAtStart(startDate);
     const end = dateValueAtEnd(startDate);
     if (start === null || end === null) return true;
-    return time >= start && time <= end;
+    return times.some((time) => time >= start && time <= end);
   }
   if (range === "custom") {
     const start = dateValueAtStart(startDate);
@@ -488,10 +495,14 @@ function matchesTimeRange(item, range, startDate, endDate) {
     if (start === null && end === null) return true;
     const lower = start !== null && end !== null ? Math.min(start, end) : start;
     const upper = start !== null && end !== null ? Math.max(start, end) : end;
-    if (lower !== null && time < lower) return false;
-    if (upper !== null && time > upper) return false;
-    return true;
+    return times.some((time) => {
+      if (lower !== null && time < lower) return false;
+      if (upper !== null && time > upper) return false;
+      return true;
+    });
   }
+  const time = new Date(item.updated_at || item.created_at).getTime();
+  if (!Number.isFinite(time)) return false;
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (range === "today") return time >= startOfToday;
@@ -499,6 +510,33 @@ function matchesTimeRange(item, range, startDate, endDate) {
   const days = Number(range.replace("d", ""));
   if (!Number.isFinite(days)) return true;
   return time >= now.getTime() - days * 24 * 60 * 60 * 1000;
+}
+
+function timeInSelectedWindow(value, range, startDate, endDate) {
+  if (!value || (range !== "exact" && range !== "custom")) return false;
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return false;
+  const start = dateValueAtStart(startDate);
+  const end = range === "exact" ? dateValueAtEnd(startDate) : dateValueAtEnd(endDate);
+  if (start === null && end === null) return false;
+  const lower = start !== null && end !== null ? Math.min(start, end) : start;
+  const upper = start !== null && end !== null ? Math.max(start, end) : end;
+  if (lower !== null && time < lower) return false;
+  if (upper !== null && time > upper) return false;
+  return true;
+}
+
+function listDateLabel(item) {
+  const range = els.timeFilter.value;
+  const startDate = els.dateStart.value;
+  const endDate = els.dateEnd.value;
+  if (timeInSelectedWindow(item.created_at, range, startDate, endDate)) {
+    return `创建 ${fmtDate(item.created_at)}`;
+  }
+  if (timeInSelectedWindow(item.updated_at, range, startDate, endDate)) {
+    return `更新 ${fmtDate(item.updated_at)}`;
+  }
+  return fmtDate(item.updated_at || item.created_at);
 }
 
 function matchesImportance(item, filter) {
@@ -526,6 +564,13 @@ function renderSummary(stats) {
 
 function applyFilters() {
   const q = els.searchInput.value.trim().toLowerCase();
+  const exactNameIds = q
+    ? new Set(
+        state.sessions
+          .filter((item) => [item.name, item.title].some((value) => String(value || "").trim().toLowerCase() === q))
+          .map((item) => item.id)
+      )
+    : new Set();
   const source = els.sourceFilter.value;
   const scene = els.sceneFilter.value;
   const provider = els.providerFilter.value;
@@ -545,9 +590,12 @@ function applyFilters() {
     if (!matchesTimeRange(item, timeRange, startDate, endDate)) return false;
     if (!matchesImportance(item, importance)) return false;
     if (!q) return true;
+    if (exactNameIds.size) return exactNameIds.has(item.id);
     const haystack = [
       item.id,
+      item.name,
       item.title,
+      item.original_title,
       item.preview,
       item.importance?.label,
       item.importance?.score,
@@ -567,15 +615,62 @@ function applyFilters() {
     ]
       .join(" ")
       .toLowerCase();
-    return haystack.includes(q);
+    const metadataMatch = haystack.includes(q);
+    const contentMatch = state.contentSearchQuery === q && state.contentMatchIds.has(item.id);
+    return metadataMatch || contentMatch;
   });
 
   renderList();
   renderSummary(state.stats);
   const active = Boolean(q) || source !== "all" || scene !== "all" || provider !== "all" ||
     project !== "all" || timeRange !== "all" || importance !== "all" || state.archive !== "all";
-  els.filterResult.textContent = active ? `找到 ${state.filtered.length} 条会话` : `全部 ${state.filtered.length} 条会话`;
+  if (state.contentSearchPending) {
+    els.filterResult.textContent = `正在搜索完整对话 · 当前 ${state.filtered.length} 条`;
+  } else if (state.contentSearchError) {
+    els.filterResult.textContent = `完整对话搜索失败 · 当前 ${state.filtered.length} 条`;
+  } else {
+    els.filterResult.textContent = active ? `找到 ${state.filtered.length} 条会话` : `全部 ${state.filtered.length} 条会话`;
+  }
   els.resetFiltersButton.classList.toggle("is-hidden", !active);
+}
+
+function queueContentSearch() {
+  const query = els.searchInput.value.trim().toLowerCase();
+  window.clearTimeout(state.contentSearchTimer);
+  const request = ++state.contentSearchRequest;
+  state.contentMatchIds = new Set();
+  state.contentSearchQuery = "";
+  state.contentSearchError = "";
+
+  const hasExactName = state.sessions.some((item) =>
+    [item.name, item.title].some((value) => String(value || "").trim().toLowerCase() === query)
+  );
+  if (query.length < 2 || hasExactName) {
+    state.contentSearchPending = false;
+    applyFilters();
+    return;
+  }
+
+  state.contentSearchPending = true;
+  applyFilters();
+  state.contentSearchTimer = window.setTimeout(async () => {
+    try {
+      const response = await fetch(`${apiBase()}/search?q=${encodeURIComponent(query)}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (request !== state.contentSearchRequest) return;
+      state.contentMatchIds = new Set(data.ids || []);
+      state.contentSearchQuery = query;
+    } catch (error) {
+      if (request !== state.contentSearchRequest) return;
+      state.contentSearchError = error.message || "搜索失败";
+    } finally {
+      if (request === state.contentSearchRequest) {
+        state.contentSearchPending = false;
+        applyFilters();
+      }
+    }
+  }, 280);
 }
 
 function updateCustomDateVisibility() {
@@ -588,6 +683,12 @@ function updateCustomDateVisibility() {
 }
 
 function resetFilters() {
+  window.clearTimeout(state.contentSearchTimer);
+  state.contentSearchRequest += 1;
+  state.contentMatchIds = new Set();
+  state.contentSearchQuery = "";
+  state.contentSearchPending = false;
+  state.contentSearchError = "";
   els.searchInput.value = "";
   for (const select of [
     els.sourceFilter,
@@ -785,7 +886,7 @@ function renderList() {
             <span class="importance-dot importance-${escapeHtml(importance.level)}" title="${escapeHtml(importance.label)}"></span>
           </div>
           <div class="card-meta">
-            <span>${escapeHtml(fmtDate(item.updated_at))}</span>
+            <span>${escapeHtml(listDateLabel(item))}</span>
             <span>${escapeHtml(shortPath(item.cwd))}</span>
           </div>
           <div class="pill-row">
@@ -1157,7 +1258,7 @@ for (const btn of document.querySelectorAll(".tool-switch-btn")) {
   btn.addEventListener("click", () => switchMode(btn.dataset.tool));
 }
 
-els.searchInput.addEventListener("input", applyFilters);
+els.searchInput.addEventListener("input", queueContentSearch);
 els.sourceFilter.addEventListener("change", applyFilters);
 els.sceneFilter.addEventListener("change", applyFilters);
 els.providerFilter.addEventListener("change", applyFilters);
