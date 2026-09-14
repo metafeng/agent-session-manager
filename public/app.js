@@ -1,3 +1,5 @@
+import { formatChineseMagnitude } from "./number-format.js";
+
 const state = {
   sessions: [],
   filtered: [],
@@ -150,16 +152,7 @@ function fmtFullDate(value) {
 }
 
 function fmtCompactNumber(value) {
-  const number = Number(value || 0);
-  if (number >= 100000000) return `${(number / 100000000).toFixed(number >= 1000000000 ? 1 : 2)} 亿`;
-  if (number >= 10000) return `${(number / 10000).toFixed(number >= 100000 ? 1 : 2)} 万`;
-  return new Intl.NumberFormat("zh-CN").format(number);
-}
-
-function fmtTenThousands(value) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number) || number <= 0) return "0 万";
-  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(number / 10000)} 万`;
+  return formatChineseMagnitude(value);
 }
 
 function fmtDuration(seconds) {
@@ -1091,7 +1084,7 @@ function renderTechnical(session, rollout, rolloutError) {
     ["是否归档", session.archived ? "是" : "否"],
     ["线程来源", session.thread_source || "未知"],
     ["推理强度", session.reasoning_effort || "未知"],
-    ["Token 用量", fmtTenThousands(session.tokens_used)],
+    ["Token 用量", fmtCompactNumber(session.tokens_used)],
     ["日志数量", session.log_count ?? "未知"],
     ["JSONL 行数", rollout?.line_count ?? "未知"],
     ["事件统计", rolloutError || countText || "无"]

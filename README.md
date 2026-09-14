@@ -110,6 +110,7 @@ CLAUDE_HOME=/path/to/.claude npm start
 ├── server.js
 ├── content-search.js
 ├── content-search.test.js
+├── number-format.test.js
 ├── project-mapping.js
 ├── project-mapping.test.js
 ├── skill-usage.js
@@ -121,6 +122,7 @@ CLAUDE_HOME=/path/to/.claude npm start
 ├── public
 │   ├── index.html
 │   ├── app.js
+│   ├── number-format.js
 │   ├── styles.css
 │   └── assets
 │       ├── codex-icon.png
