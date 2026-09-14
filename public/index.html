@@ -107,7 +107,17 @@
 
           <div class="filter-status">
             <span id="filterResult">全部会话</span>
-            <button class="is-hidden" id="resetFiltersButton" type="button">清除筛选</button>
+            <div class="filter-status-actions">
+              <label class="sort-control">
+                <span>排序</span>
+                <select id="sortFilter" aria-label="会话排序">
+                  <option value="updated_desc">最近更新</option>
+                  <option value="tokens_desc">Token 从高到低</option>
+                  <option value="tokens_asc">Token 从低到高</option>
+                </select>
+              </label>
+              <button class="is-hidden" id="resetFiltersButton" type="button">清除筛选</button>
+            </div>
           </div>
         </section>
 

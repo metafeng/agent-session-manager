@@ -28,6 +28,7 @@ const els = {
   providerFilter: document.querySelector("#providerFilter"),
   projectFilter: document.querySelector("#projectFilter"),
   timeFilter: document.querySelector("#timeFilter"),
+  sortFilter: document.querySelector("#sortFilter"),
   importanceFilter: document.querySelector("#importanceFilter"),
   customDateRange: document.querySelector("#customDateRange"),
   dateStartText: document.querySelector("#dateStartText"),
@@ -543,6 +544,27 @@ function matchesImportance(item, filter) {
   return true;
 }
 
+function sortSessions(items, mode) {
+  const updatedTime = (item) => new Date(item.updated_at || item.created_at || 0).getTime() || 0;
+  const tokenCount = (item) => {
+    const value = Number(item.tokens_used || 0);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  };
+  return items.sort((a, b) => {
+    if (mode === "tokens_desc") {
+      return tokenCount(b) - tokenCount(a) || updatedTime(b) - updatedTime(a);
+    }
+    if (mode === "tokens_asc") {
+      const aTokens = tokenCount(a);
+      const bTokens = tokenCount(b);
+      if (!aTokens && bTokens) return 1;
+      if (aTokens && !bTokens) return -1;
+      return aTokens - bTokens || updatedTime(b) - updatedTime(a);
+    }
+    return updatedTime(b) - updatedTime(a);
+  });
+}
+
 function renderSummary(stats) {
   if (!stats) return;
   els.summaryGrid.innerHTML = [
@@ -569,6 +591,7 @@ function applyFilters() {
   const provider = els.providerFilter.value;
   const project = els.projectFilter.value;
   const timeRange = els.timeFilter.value;
+  const sortMode = els.sortFilter.value;
   const importance = els.importanceFilter.value;
   const startDate = els.dateStart.value;
   const endDate = els.dateEnd.value;
@@ -612,11 +635,12 @@ function applyFilters() {
     const contentMatch = state.contentSearchQuery === q && state.contentMatchIds.has(item.id);
     return metadataMatch || contentMatch;
   });
+  sortSessions(state.filtered, sortMode);
 
   renderList();
   renderSummary(state.stats);
   const active = Boolean(q) || source !== "all" || scene !== "all" || provider !== "all" ||
-    project !== "all" || timeRange !== "all" || importance !== "all" || state.archive !== "all";
+    project !== "all" || timeRange !== "all" || importance !== "all" || state.archive !== "all" || sortMode !== "updated_desc";
   if (state.contentSearchPending) {
     els.filterResult.textContent = `正在搜索完整对话 · 当前 ${state.filtered.length} 条`;
   } else if (state.contentSearchError) {
@@ -693,6 +717,7 @@ function resetFilters() {
   ]) select.value = "all";
   els.dateStart.value = "";
   els.dateEnd.value = "";
+  els.sortFilter.value = "updated_desc";
   state.archive = "all";
   for (const button of document.querySelectorAll("[data-archive]")) {
     button.classList.toggle("is-active", button.dataset.archive === "all");
@@ -872,6 +897,7 @@ function renderList() {
       const sourceClass = item.source_key?.startsWith("terminal") ? "source-cli" : item.source_key === "codex-desktop" ? "source-desktop" : "";
       const sceneLabel = (item.scene_labels || []).find((label) => label !== "普通会话") || item.scene_labels?.[0] || "普通会话";
       const importance = item.importance || { level: "low", label: "未判断", score: 0 };
+      const showToken = els.sortFilter.value.startsWith("tokens_");
       return `
         <button class="session-card ${item.id === state.selectedId ? "is-selected" : ""}" data-id="${escapeHtml(item.id)}">
           <div class="card-top">
@@ -888,6 +914,7 @@ function renderList() {
             <span class="pill ${providerClass}">${escapeHtml(item.model_provider || "服务商")}</span>
             <span class="pill">${escapeHtml(item.model || "模型")}</span>
             <span class="pill importance-pill importance-${escapeHtml(importance.level)}">${escapeHtml(importance.label)}</span>
+            ${showToken ? `<span class="pill token-pill">${escapeHtml(fmtCompactNumber(item.tokens_used))} Token</span>` : ""}
             ${item.archived
               ? `<span class="pill archive-pill archive-action" data-archive-id="${escapeHtml(item.id)}" data-archived="1" role="button" tabindex="0" title="取消归档">已归档 ✕</span>`
               : `<span class="pill archive-action" data-archive-id="${escapeHtml(item.id)}" data-archived="0" role="button" tabindex="0" title="归档此会话">归档</span>`}
@@ -1260,6 +1287,7 @@ els.timeFilter.addEventListener("change", () => {
   updateCustomDateVisibility();
   applyFilters();
 });
+els.sortFilter.addEventListener("change", applyFilters);
 els.dateStart.addEventListener("change", applyFilters);
 els.dateEnd.addEventListener("change", applyFilters);
 els.importanceFilter.addEventListener("change", applyFilters);

@@ -250,6 +250,29 @@ select:focus,
   font-size: 11px;
 }
 
+.filter-status-actions,
+.sort-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sort-control span {
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sort-control select {
+  width: auto;
+  max-width: 126px;
+  height: 26px;
+  border: 0;
+  background-color: transparent;
+  color: var(--text);
+  padding: 0 20px 0 2px;
+  font-size: 11px;
+}
+
 .filter-status button {
   height: 24px;
   padding: 0;
@@ -265,6 +288,12 @@ select:focus,
 
 .filter-status button.is-hidden {
   display: none;
+}
+
+.token-pill {
+  color: #075985;
+  border-color: #bae6fd;
+  background: #f0f9ff;
 }
 
 .segmented {
