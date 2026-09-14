@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import { extractInvokedSkills, scanSkillUsage } from "./skill-usage.js";
 import { scanClaudeUsageMetrics, scanCodexUsageMetrics } from "./usage-metrics.js";
+import { groupProjectRows, resolveSessionProject } from "./project-mapping.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -564,10 +565,43 @@ async function sqliteJson(dbPath, sql) {
   return stdout.trim() ? JSON.parse(stdout) : [];
 }
 
+async function getCodexProjects() {
+  try {
+    const rows = await sqliteJson(
+      stateDb,
+      `select
+        p.id,
+        p.name,
+        p.position,
+        pr.path as root_path
+      from projects p
+      left join project_roots pr on pr.project_id = p.id
+      order by p.position asc, pr.position asc`
+    );
+    return groupProjectRows(rows);
+  } catch {
+    return [];
+  }
+}
+
+async function threadProjectColumnSql() {
+  try {
+    const rows = await sqliteJson(
+      stateDb,
+      `select name from pragma_table_info('threads') where name = 'project_id' limit 1`
+    );
+    return rows.length ? "project_id" : "null as project_id";
+  } catch {
+    return "null as project_id";
+  }
+}
+
 async function getSessions() {
-  const rows = await sqliteJson(
-    stateDb,
-    `select
+  const projectColumn = await threadProjectColumnSql();
+  const [rows, projects] = await Promise.all([
+    sqliteJson(
+      stateDb,
+      `select
       id,
       rollout_path,
       created_at_ms,
@@ -585,16 +619,20 @@ async function getSessions() {
       tokens_used,
       has_user_event,
       agent_nickname,
-      agent_role
+      agent_role,
+      ${projectColumn}
     from threads
     order by updated_at_ms desc`
-  );
+    ),
+    getCodexProjects()
+  ]);
 
   const overrides = await loadArchiveStore();
   return Promise.all(rows.map(async (row) => {
     const meta = await readSessionMeta(row.rollout_path);
     const originator = meta.originator || null;
     const cwd = row.cwd || meta.cwd || "";
+    const project = resolveSessionProject(projects, row.project_id, cwd);
     const source = sourceInfo(row.source, originator, row.thread_source);
     const entrySource = entrySourceInfo({
       source: row.source,
@@ -627,6 +665,9 @@ async function getSessions() {
       archived: Boolean(row.archived) || overrides.codex.has(row.id),
       has_user_event: Boolean(row.has_user_event),
       originator,
+      project_id: project?.id || row.project_id || null,
+      project_key: project?.id || "none",
+      project_name: project?.name || "未归入项目",
       source_key: entrySource.key,
       source_label: entrySource.label,
       codex_source_key: source.key,
@@ -1341,6 +1382,8 @@ async function handleApi(req, res, url) {
     const originator = rollout?.meta?.originator || null;
     const source = sourceInfo(session.source, originator, session.thread_source);
     const cwd = session.cwd || rollout?.meta?.cwd || "";
+    const projects = await getCodexProjects();
+    const project = resolveSessionProject(projects, session.project_id, cwd);
     const entrySource = entrySourceInfo({
       source: session.source,
       originator,
@@ -1374,6 +1417,9 @@ async function handleApi(req, res, url) {
         updated_at: session.updated_at_ms ? new Date(session.updated_at_ms).toISOString() : null,
         archived: Boolean(session.archived),
         originator,
+        project_id: project?.id || session.project_id || null,
+        project_key: project?.id || "none",
+        project_name: project?.name || "未归入项目",
         source_key: entrySource.key,
         source_label: entrySource.label,
         codex_source_key: source.key,

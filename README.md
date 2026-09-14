@@ -11,12 +11,13 @@
 
 - 双工具切换：顶部切换 Codex / Claude Code，作为大的模式切换，两边功能一模一样。
 - 会话列表：按更新时间浏览本机会话。
-- 多维筛选：支持按入口来源、场景标签、模型服务商、时间、重要性、归档状态筛选。
+- 多维筛选：支持按入口来源、场景标签、Codex 项目、模型服务商、时间、重要性、归档状态筛选。
 - 入口来源识别：
   - Codex：Codex 客户端、Terminal / Codex CLI、Terminal / codex exec、Obsidian / Claudian、Bridge / Lark、Bridge / Coze、子代理等。
   - Claude Code：SDK / CLI、SDK / TypeScript、Claude CLI、Claude IDE、Claude 客户端、交互式终端等。
 - 场景标签识别：标记飞书 / Lark、Obsidian 笔记、Coze / Bridge、Skill 工作流、SDK 接入、终端项目、Codex 项目等场景。
-- 自定义日期：可以用系统日期选择器按起止日期精确过滤会话。
+- 精确日期：可以用系统日历筛选某一天，也可以按开始和结束日期筛选一个范围。
+- 项目识别：优先读取新版 Codex 的项目 ID，旧会话按工作目录与项目根目录匹配，嵌套项目以最具体的目录为准。
 - 会话恢复：一键复制恢复命令（Codex：`codex resume <id> --all`；Claude Code：`claude --resume <id>`）。
 - 对话复现：按一轮一轮的用户提问、处理过程、最终回复展示历史会话。
 - 处理过程折叠：每轮回复里的工具调用、Skill、执行结果可以展开或收起。
@@ -104,6 +105,8 @@ CLAUDE_HOME=/path/to/.claude npm start
 .
 ├── package.json
 ├── server.js
+├── project-mapping.js
+├── project-mapping.test.js
 ├── skill-usage.js
 ├── skill-usage.test.js
 ├── usage-metrics.js

@@ -232,6 +232,41 @@ select:focus,
   display: none;
 }
 
+.date-range.single-date {
+  grid-template-columns: 1fr;
+}
+
+.date-range label.is-hidden {
+  display: none;
+}
+
+.filter-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.filter-status button {
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.filter-status button:hover {
+  text-decoration: underline;
+}
+
+.filter-status button.is-hidden {
+  display: none;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

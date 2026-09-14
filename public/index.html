@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent 会话管理器</title>
+    <link rel="icon" href="./assets/codex-icon.png" type="image/png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -32,7 +33,7 @@
         <section class="controls" aria-label="会话筛选">
           <label class="search">
             <span>搜索</span>
-            <input id="searchInput" type="search" placeholder="标题、ID、路径、模型服务商" autocomplete="off" />
+            <input id="searchInput" type="search" placeholder="标题、ID、项目、路径、模型服务商" autocomplete="off" />
           </label>
 
           <div class="control-row">
@@ -63,25 +64,32 @@
             </label>
           </div>
 
-          <label class="filter-wide">
-            <span>时间</span>
-            <select id="timeFilter">
-              <option value="all">全部时间</option>
-              <option value="today">今天</option>
-              <option value="7d">近 7 天</option>
-              <option value="30d">近 30 天</option>
-              <option value="90d">近 90 天</option>
-              <option value="year">今年</option>
-              <option value="custom">自定义日期</option>
-            </select>
-          </label>
-
-          <div class="date-range is-hidden" id="customDateRange">
+          <div class="control-row">
             <label>
-              <span>开始</span>
-              <input id="dateStart" type="date" />
+              <span>项目</span>
+              <select id="projectFilter"></select>
             </label>
             <label>
+              <span>时间</span>
+              <select id="timeFilter">
+                <option value="all">全部时间</option>
+                <option value="today">今天</option>
+                <option value="7d">近 7 天</option>
+                <option value="30d">近 30 天</option>
+                <option value="90d">近 90 天</option>
+                <option value="year">今年</option>
+                <option value="exact">指定日期</option>
+                <option value="custom">日期范围</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="date-range is-hidden" id="customDateRange">
+            <label id="dateStartLabel">
+              <span id="dateStartText">开始</span>
+              <input id="dateStart" type="date" />
+            </label>
+            <label id="dateEndLabel">
               <span>结束</span>
               <input id="dateEnd" type="date" />
             </label>
@@ -91,6 +99,11 @@
             <button class="is-active" data-archive="all">全部</button>
             <button data-archive="active">未归档</button>
             <button data-archive="archived">已归档</button>
+          </div>
+
+          <div class="filter-status">
+            <span id="filterResult">全部会话</span>
+            <button class="is-hidden" id="resetFiltersButton" type="button">清除筛选</button>
           </div>
         </section>
 

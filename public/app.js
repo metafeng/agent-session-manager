@@ -18,11 +18,16 @@ const els = {
   sourceFilter: document.querySelector("#sourceFilter"),
   sceneFilter: document.querySelector("#sceneFilter"),
   providerFilter: document.querySelector("#providerFilter"),
+  projectFilter: document.querySelector("#projectFilter"),
   timeFilter: document.querySelector("#timeFilter"),
   importanceFilter: document.querySelector("#importanceFilter"),
   customDateRange: document.querySelector("#customDateRange"),
+  dateStartText: document.querySelector("#dateStartText"),
+  dateEndLabel: document.querySelector("#dateEndLabel"),
   dateStart: document.querySelector("#dateStart"),
   dateEnd: document.querySelector("#dateEnd"),
+  filterResult: document.querySelector("#filterResult"),
+  resetFiltersButton: document.querySelector("#resetFiltersButton"),
   sessionList: document.querySelector("#sessionList"),
   summaryGrid: document.querySelector("#summaryGrid"),
   statsButton: document.querySelector("#statsButton"),
@@ -143,6 +148,12 @@ function fmtCompactNumber(value) {
   if (number >= 100000000) return `${(number / 100000000).toFixed(number >= 1000000000 ? 1 : 2)} 亿`;
   if (number >= 10000) return `${(number / 10000).toFixed(number >= 100000 ? 1 : 2)} 万`;
   return new Intl.NumberFormat("zh-CN").format(number);
+}
+
+function fmtTenThousands(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return "0 万";
+  return `${new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(number / 10000)} 万`;
 }
 
 function fmtDuration(seconds) {
@@ -465,6 +476,12 @@ function matchesTimeRange(item, range, startDate, endDate) {
   if (!value) return false;
   const time = new Date(value).getTime();
   if (!Number.isFinite(time)) return false;
+  if (range === "exact") {
+    const start = dateValueAtStart(startDate);
+    const end = dateValueAtEnd(startDate);
+    if (start === null || end === null) return true;
+    return time >= start && time <= end;
+  }
   if (range === "custom") {
     const start = dateValueAtStart(startDate);
     const end = dateValueAtEnd(endDate);
@@ -512,6 +529,7 @@ function applyFilters() {
   const source = els.sourceFilter.value;
   const scene = els.sceneFilter.value;
   const provider = els.providerFilter.value;
+  const project = els.projectFilter.value;
   const timeRange = els.timeFilter.value;
   const importance = els.importanceFilter.value;
   const startDate = els.dateStart.value;
@@ -523,6 +541,7 @@ function applyFilters() {
     if (source !== "all" && item.source_key !== source) return false;
     if (scene !== "all" && !(item.scene_keys || []).includes(scene)) return false;
     if (provider !== "all" && item.model_provider !== provider) return false;
+    if (project !== "all" && item.project_key !== project) return false;
     if (!matchesTimeRange(item, timeRange, startDate, endDate)) return false;
     if (!matchesImportance(item, importance)) return false;
     if (!q) return true;
@@ -540,6 +559,8 @@ function applyFilters() {
       ...(item.scene_keys || []),
       ...(item.scene_labels || []),
       item.model_provider,
+      item.project_name,
+      item.project_id,
       item.cwd,
       item.rollout_path,
       item.model
@@ -551,11 +572,39 @@ function applyFilters() {
 
   renderList();
   renderSummary(state.stats);
+  const active = Boolean(q) || source !== "all" || scene !== "all" || provider !== "all" ||
+    project !== "all" || timeRange !== "all" || importance !== "all" || state.archive !== "all";
+  els.filterResult.textContent = active ? `找到 ${state.filtered.length} 条会话` : `全部 ${state.filtered.length} 条会话`;
+  els.resetFiltersButton.classList.toggle("is-hidden", !active);
 }
 
 function updateCustomDateVisibility() {
-  const custom = els.timeFilter.value === "custom";
-  els.customDateRange.classList.toggle("is-hidden", !custom);
+  const mode = els.timeFilter.value;
+  const visible = mode === "exact" || mode === "custom";
+  els.customDateRange.classList.toggle("is-hidden", !visible);
+  els.customDateRange.classList.toggle("single-date", mode === "exact");
+  els.dateStartText.textContent = mode === "exact" ? "日期" : "开始";
+  els.dateEndLabel.classList.toggle("is-hidden", mode === "exact");
+}
+
+function resetFilters() {
+  els.searchInput.value = "";
+  for (const select of [
+    els.sourceFilter,
+    els.sceneFilter,
+    els.providerFilter,
+    els.projectFilter,
+    els.timeFilter,
+    els.importanceFilter
+  ]) select.value = "all";
+  els.dateStart.value = "";
+  els.dateEnd.value = "";
+  state.archive = "all";
+  for (const button of document.querySelectorAll("[data-archive]")) {
+    button.classList.toggle("is-active", button.dataset.archive === "all");
+  }
+  updateCustomDateVisibility();
+  applyFilters();
 }
 
 function localDateKey(date) {
@@ -796,6 +845,7 @@ function renderMeta(session) {
     ["会话 ID", session.id, "copy"],
     ["入口来源", sourceDisplayLabel(session.source_key, session.source_label || session.source)],
     ["场景标签", sceneText],
+    ...(state.mode === "codex" ? [["所属项目", session.project_name || "未归入项目"]] : []),
     ["模型服务商", session.model_provider],
     ["模型", session.model || "未知"],
     ["创建时间", fmtFullDate(session.created_at)],
@@ -940,7 +990,7 @@ function renderTechnical(session, rollout, rolloutError) {
     ["是否归档", session.archived ? "是" : "否"],
     ["线程来源", session.thread_source || "未知"],
     ["推理强度", session.reasoning_effort || "未知"],
-    ["Token 用量", session.tokens_used || "0"],
+    ["Token 用量", fmtTenThousands(session.tokens_used)],
     ["日志数量", session.log_count ?? "未知"],
     ["JSONL 行数", rollout?.line_count ?? "未知"],
     ["事件统计", rolloutError || countText || "无"]
@@ -1020,6 +1070,21 @@ async function loadSessions() {
       ).sort((a, b) => a.label.localeCompare(b.label)),
       "全部服务商"
     );
+    if (state.mode === "codex") {
+      setOptions(
+        els.projectFilter,
+        optionCounts(state.sessions, "project_key", "project_name").sort((a, b) => {
+          if (a.value === "none") return 1;
+          if (b.value === "none") return -1;
+          return a.label.localeCompare(b.label, "zh-CN");
+        }),
+        "全部项目"
+      );
+      els.projectFilter.disabled = false;
+    } else {
+      els.projectFilter.innerHTML = '<option value="all">Claude Code 暂无项目</option>';
+      els.projectFilter.disabled = true;
+    }
     applyFilters();
     if (!state.selectedId && state.filtered[0]) {
       await selectSession(state.filtered[0].id);
@@ -1090,6 +1155,7 @@ els.searchInput.addEventListener("input", applyFilters);
 els.sourceFilter.addEventListener("change", applyFilters);
 els.sceneFilter.addEventListener("change", applyFilters);
 els.providerFilter.addEventListener("change", applyFilters);
+els.projectFilter.addEventListener("change", applyFilters);
 els.timeFilter.addEventListener("change", () => {
   updateCustomDateVisibility();
   applyFilters();
@@ -1097,6 +1163,7 @@ els.timeFilter.addEventListener("change", () => {
 els.dateStart.addEventListener("change", applyFilters);
 els.dateEnd.addEventListener("change", applyFilters);
 els.importanceFilter.addEventListener("change", applyFilters);
+els.resetFiltersButton.addEventListener("click", resetFilters);
 els.statsButton.addEventListener("click", openStatsModal);
 els.closeStatsButton.addEventListener("click", closeStatsModal);
 els.statsModal.addEventListener("click", (event) => {
