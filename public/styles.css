@@ -981,6 +981,12 @@ code {
   background: #fbfbf8;
 }
 
+.process-omitted {
+  padding: 10px 0 2px 22px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .process-item {
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr) auto;

@@ -1008,7 +1008,9 @@ function renderProcess(processEvents, summary) {
     ? `<div class="skill-strip">${summary.skills.map((skill) => `<span>${escapeHtml(skill)}</span>`).join("")}</div>`
     : "";
   const label = summary?.duration ? `已处理 ${summary.duration}` : "处理过程";
-  const countLabel = `${processEvents.length} 个事件${summary?.tool_count ? `，${summary.tool_count} 次工具调用` : ""}`;
+  const eventCount = Number(summary?.event_count || processEvents.length);
+  const omittedCount = Math.max(0, eventCount - processEvents.length);
+  const countLabel = `${eventCount} 个事件${summary?.tool_count ? `，${summary.tool_count} 次工具调用` : ""}`;
   return `
     <details class="process-trace">
       <summary>
@@ -1033,6 +1035,7 @@ function renderProcess(processEvents, summary) {
           `
           )
           .join("")}
+        ${omittedCount ? `<div class="process-omitted">本轮还有 ${escapeHtml(omittedCount)} 个底层事件未展开显示</div>` : ""}
       </div>
     </details>
   `;
@@ -1114,6 +1117,7 @@ function renderTechnical(session, rollout, rolloutError) {
     ["Token 用量", fmtCompactNumber(session.tokens_used)],
     ["日志数量", session.log_count ?? "未知"],
     ["JSONL 行数", rollout?.line_count ?? "未知"],
+    ["历史记录", rollout?.truncated ? "部分载入" : "完整"],
     ["事件统计", rolloutError || countText || "无"]
   ];
 

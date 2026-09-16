@@ -468,13 +468,20 @@ function buildTurns(messages, processEvents) {
     }
   }
 
-  return turns.map((turn, index) => ({
-    id: `turn-${index + 1}`,
-    user: turn.user,
-    assistant: turn.assistant,
-    process_events: turn.process_events.slice(0, 120),
-    process_summary: summarizeProcess(turn.process_events)
-  }));
+  return turns.map((turn, index) => {
+    const processSummary = summarizeProcess(turn.process_events);
+    const visibleProcessEvents = turn.process_events.slice(0, 120);
+    return {
+      id: `turn-${index + 1}`,
+      user: turn.user,
+      assistant: turn.assistant,
+      process_events: visibleProcessEvents,
+      process_summary: {
+        ...processSummary,
+        displayed_event_count: visibleProcessEvents.length
+      }
+    };
+  });
 }
 
 function importanceFromScore(score) {
@@ -705,7 +712,7 @@ async function getSessions() {
   }));
 }
 
-async function parseRollout(path, lineLimit = 1200) {
+async function parseRollout(path, lineLimit = Infinity) {
   const meta = {};
   const counts = {};
   const messages = [];
@@ -747,7 +754,7 @@ async function parseRollout(path, lineLimit = 1200) {
       const payload = event.payload || {};
       if (payload.type === "message" && ["user", "assistant"].includes(payload.role)) {
         const rawText = textFromContent(payload.content);
-        const text = preserveText(visibleMessageText(payload.role, rawText), payload.role === "assistant" ? 6000 : 4000);
+        const text = preserveText(visibleMessageText(payload.role, rawText), Infinity);
         if (payload.role === "assistant" && payload.phase === "commentary") {
           pushProcess(processEvents, {
             kind: "agent",
@@ -836,11 +843,10 @@ async function parseRollout(path, lineLimit = 1200) {
   }
 
   const visibleMessages = withoutDuplicateEvents(messages)
-    .filter((message) => message.role !== "assistant" || !shouldHideMessage(message.role, message.text))
-    .slice(0, 80);
+    .filter((message) => message.role !== "assistant" || !shouldHideMessage(message.role, message.text));
   const skills = [...new Set(processEvents.flatMap((event) => event.skills || []))].slice(0, 16);
   const visibleProcessEvents = processEvents.slice(0, 240);
-  const turns = buildTurns(visibleMessages, visibleProcessEvents);
+  const turns = buildTurns(visibleMessages, processEvents);
   const processSummary = {
     event_count: processEvents.length,
     tool_count: toolCalls.length,
@@ -1025,7 +1031,7 @@ async function parseCCSession(filePath, lineLimit = Infinity) {
   };
 }
 
-async function parseCCRollout(filePath, lineLimit = 1200) {
+async function parseCCRollout(filePath, lineLimit = Infinity) {
   const meta = {};
   const counts = {};
   const messages = [];
@@ -1078,7 +1084,7 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
         }
       } else {
         const rawText = String(content || "");
-        const text = preserveText(visibleMessageText("user", rawText), 4000);
+        const text = preserveText(visibleMessageText("user", rawText), Infinity);
         if (!shouldHideMessage("user", text) && !ccShouldHideUserContent(content)) {
           messages.push({ role: "user", text, timestamp: ts });
         }
@@ -1092,7 +1098,7 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
 
       for (const part of content) {
         if (part.type === "text" && part.text) {
-          const text = preserveText(part.text, 6000);
+          const text = preserveText(part.text, Infinity);
           if (text) messages.push({ role: "assistant", text, timestamp: ts });
         } else if (part.type === "tool_use") {
           const name = part.name || "tool";
@@ -1113,10 +1119,10 @@ async function parseCCRollout(filePath, lineLimit = 1200) {
     }
   }
 
-  const visibleMessages = withoutDuplicateEvents(messages).slice(0, 80);
+  const visibleMessages = withoutDuplicateEvents(messages);
   const skills = [...new Set(processEvents.flatMap((e) => e.skills || []))].slice(0, 16);
   const visibleProcessEvents = processEvents.slice(0, 240);
-  const turns = buildTurns(visibleMessages, visibleProcessEvents);
+  const turns = buildTurns(visibleMessages, processEvents);
   const processSummary = {
     event_count: processEvents.length,
     tool_count: toolCalls.length,
