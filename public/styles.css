@@ -1618,10 +1618,15 @@ code {
     align-items: stretch;
   }
 
-  .conversation-panel,
-  .technical-panel {
+  .conversation-panel {
     height: 100%;
     min-height: 0;
+  }
+
+  .technical-panel {
+    align-self: start;
+    min-height: 0;
+    max-height: 100%;
   }
 
   .conversation-panel,
