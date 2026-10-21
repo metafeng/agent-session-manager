@@ -4,11 +4,13 @@
 
 - Codex 模式读取本机 `~/.codex` 下的 session、日志和 rollout JSONL 文件。
 - Claude Code 模式读取本机 `~/.claude/projects` 下当前可索引的会话 JSONL。
+- Claude 客户端模式同时读取新版 `~/Library/Application Support/Claude-3p/local-agent-mode-sessions` 中的本地 Agent/Cowork 会话，并兼容旧版 `Claude` 目录。
 
 帮助你快速找到历史会话、复制恢复命令、查看对话过程、分析 Token 消耗和 Skill 使用频率。
 
 ## 最近更新
 
+- 跟进新版 Claude 客户端存储：识别 `Claude-3p` 的 `local-agent` 会话，使用客户端标题与时间，并纳入对话详情、关键词搜索、时间筛选及 Token/Skill 统计。
 - 优化长会话浏览：桌面双栏模式下仅滚动中间对话记录，右侧技术索引以紧凑高度保持可见；索引内容超过可视区域时可在侧栏内独立滚动。
 - 修复长会话历史记录不完整：Codex 与 Claude Code 详情页现在扫描完整 JSONL，不再只读取前 1200 行或前 80 条消息；处理过程按每轮对话归属，技术索引会标明历史记录是否完整。
 - 筛选顺序重新整理：将“所属项目”和“时间”放在前面，入口来源与场景标签放在后面，优先满足按项目和日期查找会话的使用习惯。
@@ -97,6 +99,8 @@ Claude Code 模式默认读取：
 
 ```text
 ~/.claude/projects/**/*.jsonl
+~/Library/Application Support/Claude-3p/local-agent-mode-sessions/**/.claude/projects/session/*.jsonl
+~/Library/Application Support/Claude/local-agent-mode-sessions/**/.claude/projects/session/*.jsonl
 ```
 
 入口来源和场景标签来自本地字段与 rollout 内容的组合判断，包括 `source`、`originator`、`entrypoint`、`cwd`、标题和预览文本。没有稳定来源字段的第三方桥接环境会用路径和关键词启发式识别。

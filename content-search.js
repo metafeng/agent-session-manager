@@ -75,6 +75,7 @@ export async function searchSessionContent(query, roots) {
         "--files-with-matches",
         "--fixed-strings",
         "--ignore-case",
+        "--hidden",
         "--max-count",
         "1",
         "--no-messages",

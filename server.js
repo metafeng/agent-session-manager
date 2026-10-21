@@ -11,6 +11,10 @@ import { extractInvokedSkills, scanSkillUsage } from "./skill-usage.js";
 import { scanClaudeUsageMetrics, scanCodexUsageMetrics } from "./usage-metrics.js";
 import { groupProjectRows, resolveSessionProject } from "./project-mapping.js";
 import { normalizeContentQuery, searchSessionContent } from "./content-search.js";
+import {
+  applyClaudeDesktopMetadata,
+  discoverClaudeDesktopSessions
+} from "./claude-desktop-sources.js";
 
 const execFileAsync = promisify(execFile);
 const __dirname = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -21,6 +25,13 @@ const logsDb = join(codexHome, "logs_2.sqlite");
 const archivedDir = join(codexHome, "archived_sessions");
 const claudeHome = process.env.CLAUDE_HOME || join(os.homedir(), ".claude");
 const claudeProjectsDir = join(claudeHome, "projects");
+const claudeDesktopHomes = process.env.CLAUDE_DESKTOP_HOME
+  ? [process.env.CLAUDE_DESKTOP_HOME]
+  : [
+      join(os.homedir(), "Library", "Application Support", "Claude-3p"),
+      join(os.homedir(), "Library", "Application Support", "Claude")
+    ];
+const claudeDesktopSessionRoots = claudeDesktopHomes.map((home) => join(home, "local-agent-mode-sessions"));
 const port = Number(process.env.PORT || 8787);
 const contentSearchCache = { codex: new Map(), claude: new Map() };
 const contentSearchCacheTtlMs = 60_000;
@@ -898,7 +909,9 @@ function ccEntrySourceInfo(entrypoint) {
   if (entrypoint === "cli") return { key: "cc-cli", label: "Claude CLI" };
   if (entrypoint === "ide") return { key: "cc-ide", label: "Claude IDE" };
   if (entrypoint === "interactive") return { key: "cc-interactive", label: "交互式终端" };
-  if (entrypoint === "claude-desktop") return { key: "cc-claude-desktop", label: "Claude 客户端" };
+  if (entrypoint === "claude-desktop" || entrypoint === "local-agent") {
+    return { key: "cc-claude-desktop", label: "Claude 客户端" };
+  }
   return { key: `cc-${entrypoint}`, label: entrypoint };
 }
 
@@ -1151,7 +1164,7 @@ async function getCCSessions() {
   try {
     projectDirs = await readdir(claudeProjectsDir);
   } catch {
-    return [];
+    projectDirs = [];
   }
 
   const overrides = await loadArchiveStore();
@@ -1198,7 +1211,43 @@ async function getCCSessions() {
     }
   }
 
-  return sessions.sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+  const desktopInputs = await discoverClaudeDesktopSessions(claudeDesktopSessionRoots);
+  for (const { filePath, metadata } of desktopInputs) {
+    try {
+      const parsed = await parseCCSession(filePath);
+      const raw = applyClaudeDesktopMetadata(parsed, metadata);
+      raw.model_provider = ccProviderFromModel(raw.model);
+      const entrySource = ccEntrySourceInfo(raw.entrypoint);
+      const sceneTags = ccSceneTagsFor({
+        entrypoint: raw.entrypoint,
+        cwd: raw.cwd,
+        title: raw.title,
+        preview: raw.preview
+      });
+      const importance = judgeImportance({
+        title: raw.title,
+        preview: raw.preview,
+        cwd: raw.cwd,
+        tokens: raw.tokens_used
+      });
+      sessions.push({
+        ...raw,
+        archived: Boolean(raw.archived) || overrides.claude.has(raw.id),
+        source_key: entrySource.key,
+        source_label: entrySource.label,
+        scene_keys: sceneTags.map((t) => t.key),
+        scene_labels: sceneTags.map((t) => t.label),
+        importance,
+        resume_command: "open -a Claude"
+      });
+    } catch {
+      // Skip incomplete desktop sessions while Claude is writing them.
+    }
+  }
+
+  const uniqueSessions = new Map();
+  for (const session of sessions) uniqueSessions.set(session.id, session);
+  return [...uniqueSessions.values()].sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
 }
 
 async function getCCAnalytics() {
@@ -1258,7 +1307,8 @@ async function handleCCApi(req, res, url) {
     return json(res, 200, {
       ok: true,
       claude_home: claudeHome,
-      projects_dir: claudeProjectsDir
+      projects_dir: claudeProjectsDir,
+      desktop_session_roots: claudeDesktopSessionRoots
     });
   }
 
@@ -1288,7 +1338,7 @@ async function handleCCApi(req, res, url) {
     const key = query.toLocaleLowerCase();
     let ids = cachedContentSearch(contentSearchCache.claude, key);
     if (!ids) {
-      ids = await searchSessionContent(query, [claudeProjectsDir]);
+      ids = await searchSessionContent(query, [claudeProjectsDir, ...claudeDesktopSessionRoots]);
       storeContentSearch(contentSearchCache.claude, key, ids);
     }
     return json(res, 200, { ids, query, count: ids.length });

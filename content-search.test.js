@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeContentQuery, sessionIdFromRolloutPath } from "./content-search.js";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import os from "node:os";
+import {
+  normalizeContentQuery,
+  searchSessionContent,
+  sessionIdFromRolloutPath
+} from "./content-search.js";
 
 test("normalizes and bounds content queries", () => {
   assert.equal(normalizeContentQuery("  精确\n 搜索  "), "精确 搜索");
@@ -17,4 +24,18 @@ test("extracts Codex and Claude session ids from rollout paths", () => {
     "7d04af1a-b1cc-4e7c-9daa-80d25138f151"
   );
   assert.equal(sessionIdFromRolloutPath("/tmp/not-a-session.jsonl"), null);
+});
+
+test("searches JSONL files inside hidden Claude Desktop directories", async () => {
+  const root = await mkdtemp(join(os.tmpdir(), "hidden-claude-search-"));
+  const transcriptDir = join(root, "workspace", ".claude", "projects", "session");
+  const sessionId = "74b4388c-da93-4aa4-811f-151f8f6f5e21";
+  await mkdir(transcriptDir, { recursive: true });
+  await writeFile(join(transcriptDir, `${sessionId}.jsonl`), '{"message":"客户端关键词"}\n');
+
+  try {
+    assert.deepEqual(await searchSessionContent("客户端关键词", [root]), [sessionId]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
