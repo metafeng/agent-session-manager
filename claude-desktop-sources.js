@@ -93,3 +93,11 @@ export function applyClaudeDesktopMetadata(session, metadata) {
     archived: Boolean(metadata?.isArchived) || Boolean(session.archived)
   };
 }
+
+export function claudeDesktopResumeCommand(session) {
+  const desktopSessionId = String(session?.desktop_session_id || "").trim();
+  if (/^local_[A-Za-z0-9-]{1,100}$/.test(desktopSessionId)) {
+    return `open "claude://claude.ai/cowork/${desktopSessionId}"`;
+  }
+  return "open -a Claude";
+}

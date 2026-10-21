@@ -27,6 +27,13 @@ export function claudeUsageTokens(usage) {
     Number(usage?.cache_creation_input_tokens || 0);
 }
 
+export function claudeAssistantResponseKey(event) {
+  const messageId = String(event?.message?.id || "").trim();
+  if (messageId) return `message:${messageId}`;
+  const eventId = String(event?.uuid || "").trim();
+  return eventId ? `event:${eventId}` : null;
+}
+
 export function isClaudeUserPrompt(event) {
   if (event?.type !== "user" || event.isMeta || event.isSidechain) return false;
   const content = event.message?.content ?? event.content;
@@ -183,6 +190,7 @@ export async function scanClaudeUsageMetrics(filePaths) {
       crlfDelay: Infinity
     });
     let activeTurnStartedAt = null;
+    const seenAssistantResponses = new Set();
 
     for await (const line of rl) {
       if (
@@ -205,16 +213,22 @@ export async function scanClaudeUsageMetrics(filePaths) {
       }
 
       if (event.type === "assistant" && !event.isSidechain) {
-        const tokens = claudeUsageTokens(event.message?.usage);
-        if (tokens > 0) {
-          sessionTokens[path] = (sessionTokens[path] || 0) + tokens;
-          addDailyTokens(tokenByDay, event.timestamp, tokens);
-        }
-        const model = event.message?.model;
-        if (model && !String(model).startsWith("<")) {
-          if (!modelsBySession.has(path)) modelsBySession.set(path, new Set());
-          modelsBySession.get(path).add(model);
-          modelEventCounts[model] = (modelEventCounts[model] || 0) + 1;
+        const responseKey = claudeAssistantResponseKey(event);
+        const isNewResponse = !responseKey || !seenAssistantResponses.has(responseKey);
+        if (responseKey) seenAssistantResponses.add(responseKey);
+
+        if (isNewResponse) {
+          const tokens = claudeUsageTokens(event.message?.usage);
+          if (tokens > 0) {
+            sessionTokens[path] = (sessionTokens[path] || 0) + tokens;
+            addDailyTokens(tokenByDay, event.timestamp, tokens);
+          }
+          const model = event.message?.model;
+          if (model && !String(model).startsWith("<")) {
+            if (!modelsBySession.has(path)) modelsBySession.set(path, new Set());
+            modelsBySession.get(path).add(model);
+            modelEventCounts[model] = (modelEventCounts[model] || 0) + 1;
+          }
         }
 
         if (activeTurnStartedAt && ["end_turn", "stop_sequence"].includes(event.message?.stop_reason)) {

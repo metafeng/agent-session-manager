@@ -8,11 +8,16 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import os from "node:os";
 import { extractInvokedSkills, scanSkillUsage } from "./skill-usage.js";
-import { scanClaudeUsageMetrics, scanCodexUsageMetrics } from "./usage-metrics.js";
+import {
+  claudeAssistantResponseKey,
+  scanClaudeUsageMetrics,
+  scanCodexUsageMetrics
+} from "./usage-metrics.js";
 import { groupProjectRows, resolveSessionProject } from "./project-mapping.js";
 import { normalizeContentQuery, searchSessionContent } from "./content-search.js";
 import {
   applyClaudeDesktopMetadata,
+  claudeDesktopResumeCommand,
   discoverClaudeDesktopSessions
 } from "./claude-desktop-sources.js";
 
@@ -975,6 +980,7 @@ async function parseCCSession(filePath, lineLimit = Infinity) {
   let model = null;
   let lineCount = 0;
   let turnCount = 0;
+  const seenAssistantResponses = new Set();
 
   for await (const line of rl) {
     lineCount += 1;
@@ -1011,9 +1017,14 @@ async function parseCCSession(filePath, lineLimit = Infinity) {
     if (event.type === "assistant" && !event.isSidechain) {
       const msg = event.message || {};
       if (!model && msg.model && !String(msg.model).startsWith("<")) model = msg.model;
-      const usage = msg.usage || {};
-      totalInputTokens += (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
-      totalOutputTokens += usage.output_tokens || 0;
+      const responseKey = claudeAssistantResponseKey(event);
+      const isNewResponse = !responseKey || !seenAssistantResponses.has(responseKey);
+      if (responseKey) seenAssistantResponses.add(responseKey);
+      if (isNewResponse) {
+        const usage = msg.usage || {};
+        totalInputTokens += (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0);
+        totalOutputTokens += usage.output_tokens || 0;
+      }
     }
   }
 
@@ -1238,7 +1249,7 @@ async function getCCSessions() {
         scene_keys: sceneTags.map((t) => t.key),
         scene_labels: sceneTags.map((t) => t.label),
         importance,
-        resume_command: "open -a Claude"
+        resume_command: claudeDesktopResumeCommand(raw)
       });
     } catch {
       // Skip incomplete desktop sessions while Claude is writing them.

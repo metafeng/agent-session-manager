@@ -5,6 +5,7 @@ import { join } from "node:path";
 import os from "node:os";
 import {
   applyClaudeDesktopMetadata,
+  claudeDesktopResumeCommand,
   discoverClaudeDesktopSessions
 } from "./claude-desktop-sources.js";
 
@@ -61,4 +62,12 @@ test("uses Claude Desktop metadata for title, dates, folder and model", () => {
   assert.equal(result.model, "claude-opus-5-5");
   assert.equal(result.archived, true);
   assert.equal(result.desktop_session_id, "local-id");
+});
+
+test("builds an exact Claude Desktop session link", () => {
+  assert.equal(
+    claudeDesktopResumeCommand({ desktop_session_id: "local_f2f9ff0f-15ed-4f7a-9189-f8709756b2c5" }),
+    'open "claude://claude.ai/cowork/local_f2f9ff0f-15ed-4f7a-9189-f8709756b2c5"'
+  );
+  assert.equal(claudeDesktopResumeCommand({ desktop_session_id: "invalid id" }), "open -a Claude");
 });
